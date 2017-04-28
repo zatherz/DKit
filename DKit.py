@@ -322,8 +322,8 @@ class DcdGotoDefinitionCommand(sublime_plugin.TextCommand):
             sublime.error_message('Please set the cursor on the token to check.')
             return
 
-        pos = self.view.sel()[0].a
-        args = ['"%s"' % client_path, '--symbolLocation', '-c', str(pos)]
+        pos = self.view.sel()[0].a + 1
+        args = ['"%s"' % client_path, '--symbolLocation', '-c', str(pos), '-p"%s"' % server_port]
 
         client = Popen(get_shell_args(args), stdin=PIPE, stdout=PIPE, shell=True)
         contents = self.view.substr(sublime.Region(0, self.view.size()))
@@ -347,7 +347,7 @@ class DcdGotoDefinitionCommand(sublime_plugin.TextCommand):
 
 class DcdShowDocumentationCommand(sublime_plugin.TextCommand):
     _REGEX = re.compile(r'(?<!\\)\\('
-                        '(?P<code>[\\\'"abfnrtv])|'
+                        '(?P<code>(\\\\)|([\\\'"abfnrtv]))|'
                         '(?P<oct>[0-7]{1,3})|'
                         'x(?P<hex>[0-9a-fA-F]{1,2})|'
                         'u(?P<uni>[0-9a-fA-F]{4})|'
@@ -359,8 +359,8 @@ class DcdShowDocumentationCommand(sublime_plugin.TextCommand):
             sublime.error_message('Please set the cursor on the token to check.')
             return
 
-        pos = self.view.sel()[0].a
-        args = ['"%s"' % client_path, '--doc', '-c', str(pos)]
+        pos = self.view.sel()[0].a + 1
+        args = ['"%s"' % client_path, '--doc', '-c', str(pos), '-p"%s"' % server_port]
 
         client = Popen(get_shell_args(args), stdin=PIPE, stdout=PIPE, shell=True)
         contents = self.view.substr(sublime.Region(0, self.view.size()))
@@ -377,6 +377,7 @@ class DcdShowDocumentationCommand(sublime_plugin.TextCommand):
         sublime.active_window().run_command("show_panel", {"panel": "output.ddoc"})
 
     _ESCAPE_CODES = {
+	'\\\\': '\\',
         '\\': '\\',
         "'": "'",
         '"': '"',
