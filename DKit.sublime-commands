@@ -4,6 +4,10 @@
     "command": "dcd_start_server"
   },
   {
+    "caption": "DKit: Kill DCD Autocompletion Server",
+    "command": "dcd_kill_server"
+  },
+  {
     "caption": "DKit: Update Import Paths",
     "command": "dcd_update_include_paths"
   },
