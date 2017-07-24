@@ -113,27 +113,55 @@ def on_load(path=None, window=None, encoded_row_col=True, begin_edit=False):
 
     return wrapper
 
-def start_server():
-    global server_process
+def get_active_project_path():
+    import os
+    window = sublime.active_window()
+    folders = window.folders()
+    if len(folders) == 1:
+        return folders[0]
+    else:
+        active_view = window.active_view()
+        active_file_name = active_view.file_name() if active_view else None
+        if not active_file_name:
+            return folders[0] if len(folders) else os.path.expanduser("~")
+        for folder in folders:
+            if active_file_name.startswith(folder):
+                return folder
+        return os.path.dirname(active_file_name)
+
+def ensure_paths_are_set():
+    global server_path
     global client_path
-
-    out = call(client_path + " -q", shell=True, stdout=PIPE)
-    if out == 0:
-        print("Already running!")
-        return
-
     global plugin_settings
+
     plugin_settings = sublime.load_settings('DKit.sublime-settings')
 
-    global server_port
     server_port = read_settings('dcd_port', 9166)
     dcd_path = read_settings('dcd_path', '')
 
-    global server_path
     server_path = os.path.join(dcd_path, 'dcd-server' + ('.exe' if sys.platform == 'win32' else ''))
     client_path = os.path.join(dcd_path, 'dcd-client' + ('.exe' if sys.platform == 'win32' else ''))
     server_path = sublime.expand_variables(server_path, sublime.active_window().extract_variables())
     client_path = sublime.expand_variables(client_path, sublime.active_window().extract_variables())
+
+def kill_server():
+    global client_path
+    ensure_paths_are_set()
+    call(client_path + " -p" + str(server_port) + " --shutdown", shell=True, stdout=PIPE)
+    print(client_path + " -p" + str(server_port) + " --shutdown")
+
+def start_server(view, force = False):
+    global server_process
+    global client_path
+    global server_port
+    global server_path
+
+    out = call(client_path + " -p" + str(server_port) + " -q", shell=True, stdout=PIPE)
+    if out == 0 and not force:
+        print("Already running!")
+        return
+
+    ensure_paths_are_set()
 
     if not os.path.exists(server_path):
         sublime.error_message('DCD server doesn\'t exist in the path specified:\n' + server_path + '\n\nSetup the path in DCD package settings and then restart sublime to get things working.')
@@ -142,6 +170,8 @@ def start_server():
     if not os.path.exists(client_path):
         sublime.error_message('DCD client doesn\'t exist in the path specified:\n' + client_path + '\n\nSetup the path in DCD package settings and then restart sublime to get things working.')
         return False
+
+    dub = Popen(get_shell_args(['dub', 'describe', '--import-paths']), stdin=PIPE, stdout=PIPE, shell=True, cwd=get_active_project_path())
 
     include_paths = read_all_settings('include_paths')
     include_paths = ['-I"' + p + '"' for p in include_paths]
@@ -155,7 +185,7 @@ def start_server():
     return True
 
 def update_project(view, package_folder):
-    dub = Popen(get_shell_args(['dub', 'describe']), stdin=PIPE, stdout=PIPE, shell=True, cwd=package_folder)
+    dub = Popen(get_shell_args(['dub', 'describe']), stdin=PIPE, stdout=PIPE, shell=True, cwd=get_active_project_path())
     description = dub.communicate()
     description = description[0].decode('utf-8')
 
@@ -221,7 +251,7 @@ class DCD(sublime_plugin.EventListener):
 
         global server_process
         if server_process is None:
-            start_server()
+            start_server(view)
 
         position = locations[0]
         position = position - len(prefix)
@@ -293,14 +323,21 @@ class DCD(sublime_plugin.EventListener):
             text = line
         return visible_name, text
 
-class DcdStartServerCommand(sublime_plugin.ApplicationCommand):
-    def run(self):
-        start_server()
+class DcdStartServerCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        kill_server()
+        start_server(self.view, force = True)
+
+class DcdKillServerCommand(sublime_plugin.TextCommand):
+    def run(self, edit):
+        kill_server()
 
 class DcdUpdateIncludePathsCommand(sublime_plugin.TextCommand):
     def run(self, edit):
+        update_project(self.view, get_active_project_path())
+
         global client_path
-        Popen(get_shell_args(['"%s"' % client_path, '--clearCache']), shell=True).wait()
+        Popen(get_shell_args(['"%s"' % client_path, '-p' + str(server_port), '--clearCache']), shell=True).wait()
 
         include_paths = set()
         for path in self.view.settings().get('include_paths', []):
@@ -314,6 +351,7 @@ class DcdUpdateIncludePathsCommand(sublime_plugin.TextCommand):
             args.extend(['-I' + p for p in include_paths])
 
             Popen(get_shell_args(args), shell=True).wait()
+            print(get_shell_args(args))
 
 class DcdGotoDefinitionCommand(sublime_plugin.TextCommand):
     def run(self, edit):
@@ -323,7 +361,7 @@ class DcdGotoDefinitionCommand(sublime_plugin.TextCommand):
             return
 
         pos = self.view.sel()[0].a
-        args = ['"%s"' % client_path, '--symbolLocation', '-c', str(pos)]
+        args = ['"%s"' % client_path, '--symbolLocation', '-p' + str(server_port), '-c', str(pos)]
 
         client = Popen(get_shell_args(args), stdin=PIPE, stdout=PIPE, shell=True)
         contents = self.view.substr(sublime.Region(0, self.view.size()))
@@ -457,4 +495,4 @@ class DubUpdateProjectCommand(sublime_plugin.TextCommand):
             sublime.error_message("The active project does not specify the path to the DUB package file.")
             return
 
-        update_project(self.view, os.path.dirname(package_file))
+        update_project(self.view, get_active_project_path())
